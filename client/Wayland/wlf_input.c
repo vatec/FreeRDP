@@ -183,11 +183,11 @@ BOOL wlf_handle_pointer_axis(freerdp* instance, const UwacPointerAxisEvent* ev)
 	 */
 	step = abs(direction);
 	if (step > 0xFF)
-		step = WheelRotationMask;
+		step = 0;
 
 	/* Negative rotation, so count down steps from top */
 	if (flags & PTR_FLAGS_WHEEL_NEGATIVE)
-		step = 0xFF - step;
+		step = 0 - step;
 	
 	flags |= step;
 
