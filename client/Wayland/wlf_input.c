@@ -193,7 +193,7 @@ BOOL wlf_handle_pointer_axis(freerdp* instance, const UwacPointerAxisEvent* ev)
 	if (flags & PTR_FLAGS_WHEEL_NEGATIVE)
 		step = (0xFF - step) * 10;
 	else
-		step = step * 20
+		step = step * 20;
 
 	flags |= step;
 
