@@ -172,29 +172,15 @@ BOOL wlf_handle_pointer_axis(freerdp* instance, const UwacPointerAxisEvent* ev)
 	}
 	
 	step = abs(direction);
-	/*if (step > WheelRotationMask)
-		if (flags & PTR_FLAGS_WHEEL_NEGATIVE)
-			step = 0xFF - step;
-		else
-			step = WheelRotationMask * 10;
-	
-*/
-	
-	/* Wheel rotation steps:
-	 *
-	 * positive: 0 ... 0xFF  -> slow ... fast
-	 * negative: 0 ... 0xFF  -> fast ... slow
-	 */
-	step = abs(direction);
+
 	if (step > 0xFF)
 		step = 0xFF;
 
 	/* Negative rotation, so count down steps from top */
 	if (flags & PTR_FLAGS_WHEEL_NEGATIVE)
-		step = (0xFF - step) * 10;
-	else
-		step = step * 10;
+		step = 0xFF - step;
 
+	step = step * 10;
 	flags |= step;
 
 	return freerdp_input_send_mouse_event(input, flags, (UINT16)x, (UINT16)y);
