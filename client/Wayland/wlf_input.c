@@ -180,7 +180,7 @@ BOOL wlf_handle_pointer_axis(freerdp* instance, const UwacPointerAxisEvent* ev)
 	if (flags & PTR_FLAGS_WHEEL_NEGATIVE)
 		step = 0xFF - step;
 
-	//step = step * 10;
+	step = step * 10;
 	flags |= step;
 
 	return freerdp_input_send_mouse_event(input, flags, (UINT16)x, (UINT16)y);
