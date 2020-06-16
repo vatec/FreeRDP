@@ -136,13 +136,13 @@ static void xdg_handle_toplevel_configure(void* data, struct xdg_toplevel* xdg_t
 		{
 			assert(
 			    uwacErrorHandler(window->display, ret, "failed to reallocate a wayland buffers\n"));
-			window->drawingBufferIdx = window->pendingBufferIdx = -1;
+			window->drawingBuffer = window->pendingBuffer = NULL;
 			return;
 		}
 
-		window->drawingBufferIdx = 0;
-		if (window->pendingBufferIdx != -1)
-			window->pendingBufferIdx = window->drawingBufferIdx;
+		window->drawingBuffer = &window->buffers[0];
+		if (window->pendingBuffer != NULL)
+			window->pendingBuffer = window->drawingBuffer;
 	}
 	else
 	{
@@ -219,13 +219,13 @@ static void ivi_handle_configure(void* data, struct ivi_surface* surface, int32_
 		{
 			assert(
 			    uwacErrorHandler(window->display, ret, "failed to reallocate a wayland buffers\n"));
-			window->drawingBufferIdx = window->pendingBufferIdx = -1;
+			window->drawingBuffer = window->pendingBuffer = NULL;
 			return;
 		}
 
-		window->drawingBufferIdx = 0;
-		if (window->pendingBufferIdx != -1)
-			window->pendingBufferIdx = window->drawingBufferIdx;
+		window->drawingBuffer = &window->buffers[0];
+		if (window->pendingBuffer != NULL)
+			window->pendingBuffer = window->drawingBuffer;
 	}
 	else
 	{
@@ -277,13 +277,13 @@ static void shell_configure(void* data, struct wl_shell_surface* surface, uint32
 		{
 			assert(
 			    uwacErrorHandler(window->display, ret, "failed to reallocate a wayland buffers\n"));
-			window->drawingBufferIdx = window->pendingBufferIdx = -1;
+			window->drawingBuffer = window->pendingBuffer = NULL;
 			return;
 		}
 
-		window->drawingBufferIdx = 0;
-		if (window->pendingBufferIdx != -1)
-			window->pendingBufferIdx = window->drawingBufferIdx;
+		window->drawingBuffer = &window->buffers[0];
+		if (window->pendingBuffer != NULL)
+			window->pendingBuffer = window->drawingBuffer;
 	}
 	else
 	{
@@ -364,21 +364,15 @@ error_mmap:
 	return ret;
 }
 
-static UwacBuffer* UwacWindowFindFreeBuffer(UwacWindow* w, SSIZE_T* index)
+static UwacBuffer* UwacWindowFindFreeBuffer(UwacWindow* w)
 {
-	SSIZE_T i;
-	int ret;
-
-	if (index)
-		*index = -1;
+	int i, ret;
 
 	for (i = 0; i < w->nbuffers; i++)
 	{
 		if (!w->buffers[i].used)
 		{
 			w->buffers[i].used = true;
-			if (index)
-				*index = i;
 			return &w->buffers[i];
 		}
 	}
@@ -392,8 +386,6 @@ static UwacBuffer* UwacWindowFindFreeBuffer(UwacWindow* w, SSIZE_T* index)
 	}
 
 	w->buffers[i].used = true;
-	if (index)
-		*index = i;
 	return &w->buffers[i];
 }
 
@@ -465,8 +457,7 @@ UwacWindow* UwacCreateWindowShm(UwacDisplay* display, uint32_t width, uint32_t h
 	}
 
 	w->buffers[0].used = true;
-	w->drawingBufferIdx = 0;
-	w->pendingBufferIdx = -1;
+	w->drawingBuffer = &w->buffers[0];
 	w->surface = wl_compositor_create_surface(display->compositor);
 
 	if (!w->surface)
@@ -612,16 +603,7 @@ UwacReturnCode UwacWindowSetInputRegion(UwacWindow* window, uint32_t x, uint32_t
 
 void* UwacWindowGetDrawingBuffer(UwacWindow* window)
 {
-	UwacBuffer* buffer;
-
-	if (window->drawingBufferIdx < 0)
-		return NULL;
-
-	buffer = &window->buffers[window->drawingBufferIdx];
-	if (!buffer)
-		return NULL;
-
-	return buffer->data;
+	return window->drawingBuffer->data;
 }
 
 static void frame_done_cb(void* data, struct wl_callback* callback, uint32_t time);
@@ -672,7 +654,7 @@ static void frame_done_cb(void* data, struct wl_callback* callback, uint32_t tim
 	UwacFrameDoneEvent* event;
 
 	wl_callback_destroy(callback);
-	window->pendingBufferIdx = -1;
+	window->pendingBuffer = NULL;
 	event = (UwacFrameDoneEvent*)UwacDisplayNewEvent(window->display, UWAC_EVENT_FRAME_DONE);
 
 	if (event)
@@ -695,20 +677,13 @@ UwacReturnCode UwacWindowAddDamage(UwacWindow* window, uint32_t x, uint32_t y, u
                                    uint32_t height)
 {
 	RECTANGLE_16 box;
-	UwacBuffer* buf;
 
 	box.left = x;
 	box.top = y;
 	box.right = x + width;
 	box.bottom = y + height;
 
-	if (window->drawingBufferIdx < 0)
-		return UWAC_ERROR_INTERNAL;
-
-	buf = &window->buffers[window->drawingBufferIdx];
-	if (!buf)
-		return UWAC_ERROR_INTERNAL;
-
+	UwacBuffer* buf = window->drawingBuffer;
 	if (!region16_union_rect(&buf->damage, &buf->damage, &box))
 		return UWAC_ERROR_INTERNAL;
 
@@ -720,7 +695,7 @@ UwacReturnCode UwacWindowAddDamage(UwacWindow* window, uint32_t x, uint32_t y, u
 UwacReturnCode UwacWindowGetDrawingBufferGeometry(UwacWindow* window, UwacSize* geometry,
                                                   size_t* stride)
 {
-	if (!window || (window->drawingBufferIdx < 0))
+	if (!window || !window->drawingBuffer)
 		return UWAC_ERROR_INTERNAL;
 
 	if (geometry)
@@ -737,25 +712,20 @@ UwacReturnCode UwacWindowGetDrawingBufferGeometry(UwacWindow* window, UwacSize* 
 
 UwacReturnCode UwacWindowSubmitBuffer(UwacWindow* window, bool copyContentForNextFrame)
 {
-	UwacBuffer* drawingBuffer;
-	UwacBuffer* nextBuffer;
+	UwacBuffer* drawingBuffer = window->drawingBuffer;
 
-	if (window->drawingBufferIdx < 0)
-		return UWAC_ERROR_INTERNAL;
-
-	drawingBuffer = &window->buffers[window->drawingBufferIdx];
-
-	if ((window->pendingBufferIdx >= 0) || !drawingBuffer->dirty)
+	if (window->pendingBuffer || !drawingBuffer->dirty)
 		return UWAC_SUCCESS;
 
-	window->pendingBufferIdx = window->drawingBufferIdx;
-	nextBuffer = UwacWindowFindFreeBuffer(window, &window->drawingBufferIdx);
+	window->pendingBuffer = drawingBuffer;
+	window->drawingBuffer = UwacWindowFindFreeBuffer(window);
 
-	if ((!nextBuffer) || (window->drawingBufferIdx < 0))
+	if (!window->drawingBuffer)
 		return UWAC_ERROR_NOMEMORY;
 
 	if (copyContentForNextFrame)
-		memcpy(nextBuffer->data, drawingBuffer->data, window->stride * window->height);
+		memcpy(window->drawingBuffer->data, window->pendingBuffer->data,
+		       window->stride * window->height);
 
 	UwacSubmitBufferPtr(window, drawingBuffer);
 	return UWAC_SUCCESS;
